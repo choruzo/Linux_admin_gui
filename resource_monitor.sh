@@ -31,10 +31,84 @@ get_mem_usage() {
     echo "$perc% (Usado: ${used}MB, Libre: ${free_mem}MB, Dispon.: ${available}MB)"
 }
 
-# Función para obtener información de discos usando df
+# Variables globales para almacenar el estado anterior de I/O
+declare -A PREV_DISK_READS
+declare -A PREV_DISK_WRITES
+PREV_DISK_TIME=0
+
+# Función para obtener I/O stats de un dispositivo desde /proc/diskstats
+get_device_io() {
+    local device=$1
+    # Buscar el dispositivo en /proc/diskstats (solo el nombre base, sin /dev/)
+    local stats=$(grep -w "${device}" /proc/diskstats 2>/dev/null)
+    if [ -z "$stats" ]; then
+        echo "0 0"
+        return
+    fi
+    # Campos: reads completed (campo 4), writes completed (campo 8)
+    local reads=$(echo "$stats" | awk '{print $4}')
+    local writes=$(echo "$stats" | awk '{print $8}')
+    echo "$reads $writes"
+}
+
+# Función para obtener información de discos usando df con I/O por montaje
 get_disk_usage() {
-    # Se muestra el uso de discos montados (omitimos los sistemas virtuales)
-    df -h --total | grep "total" | awk '{print "Total: "$2", Usado: "$3", Libre: "$4", Uso: "$5}'
+    local current_time=$(date +%s)
+    local time_diff=1
+    
+    # Calcular diferencia de tiempo si hay medición previa
+    if [ $PREV_DISK_TIME -gt 0 ]; then
+        time_diff=$((current_time - PREV_DISK_TIME))
+        if [ $time_diff -eq 0 ]; then
+            time_diff=1
+        fi
+    fi
+    
+    # Obtener listado de discos montados (excluir tmpfs, devtmpfs, y otros virtuales)
+    local disk_info=$(df -h | grep -E "^/dev/" | grep -v "tmpfs")
+    
+    echo ""
+    while IFS= read -r line; do
+        local device=$(echo "$line" | awk '{print $1}')
+        local mount=$(echo "$line" | awk '{print $6}')
+        local size=$(echo "$line" | awk '{print $2}')
+        local used=$(echo "$line" | awk '{print $3}')
+        local avail=$(echo "$line" | awk '{print $4}')
+        local percent=$(echo "$line" | awk '{print $5}')
+        
+        # Resolver dispositivo real si es /dev/root
+        local real_device="$device"
+        if [ "$device" = "/dev/root" ]; then
+            real_device=$(findmnt -n -o SOURCE "$mount" 2>/dev/null || echo "$device")
+        fi
+        
+        # Extraer nombre del dispositivo sin /dev/
+        local dev_name=$(basename "$real_device")
+        
+        # Obtener stats actuales de I/O
+        local io_stats=$(get_device_io "$dev_name")
+        local current_reads=$(echo "$io_stats" | awk '{print $1}')
+        local current_writes=$(echo "$io_stats" | awk '{print $2}')
+        
+        # Calcular I/O por segundo
+        local reads_per_sec=0
+        local writes_per_sec=0
+        
+        if [ $PREV_DISK_TIME -gt 0 ] && [ -n "${PREV_DISK_READS[$dev_name]}" ]; then
+            reads_per_sec=$(( (current_reads - PREV_DISK_READS[$dev_name]) / time_diff ))
+            writes_per_sec=$(( (current_writes - PREV_DISK_WRITES[$dev_name]) / time_diff ))
+        fi
+        
+        # Guardar valores actuales para la próxima iteración
+        PREV_DISK_READS[$dev_name]=$current_reads
+        PREV_DISK_WRITES[$dev_name]=$current_writes
+        
+        # Mostrar información
+        printf "  %s: %s (%s) | R: %d/s, W: %d/s\n" "$mount" "$percent" "$used" "$reads_per_sec" "$writes_per_sec"
+    done <<< "$disk_info"
+    
+    # Actualizar tiempo de última medición
+    PREV_DISK_TIME=$current_time
 }
 
 # Función para obtener uso de red a partir de /proc/net/dev
@@ -55,7 +129,9 @@ get_net_usage() {
 guardar_log() {
     local timestamp
     timestamp=$(date +"%Y-%m-%d %H:%M:%S")
-    echo "$timestamp, CPU: $(get_cpu_usage), MEM: $(get_mem_usage), DISCO: $(get_disk_usage), RED: $(get_net_usage)" >> "$LOG_FILE"
+    # Obtener información de discos en formato compacto para log
+    local disk_summary=$(df -h | grep -E "^/dev/" | grep -v "tmpfs" | awk '{printf "%s:%s ", $6, $5}')
+    echo "$timestamp, CPU: $(get_cpu_usage), MEM: $(get_mem_usage), DISCO: $disk_summary, RED: $(get_net_usage)" >> "$LOG_FILE"
 }
 
 # Valores por defecto
