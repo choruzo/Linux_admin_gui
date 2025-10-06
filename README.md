@@ -6,7 +6,7 @@ Este script, `resource_monitor.sh`, es un monitor de recursos para sistemas SUSE
 
 - **CPU:** Muestra el porcentaje de uso activo utilizando el comando `top`.
 - **Memoria:** Muestra el porcentaje de memoria usada, total, libre y disponible usando el comando `free`.
-- **Discos:** Muestra el estado de uso de los discos montados usando el comando `df`.
+- **Discos:** Muestra el estado de uso de los discos montados por punto de montaje con porcentaje de uso e I/O por segundo (lecturas y escrituras), utilizando `df` y `/proc/diskstats`.
 - **Red:** Extrae y muestra estadísticas de red (RX y TX) de la primera interfaz activa (no loopback) consultando `/proc/net/dev`.
 - **Logging:** Opción de guardar los datos en un archivo durante un tiempo definido por el usuario.
 - **Interfaz gráfica en terminal:** Se refresca periódicamente la pantalla para mostrar los datos actualizados.
@@ -14,7 +14,7 @@ Este script, `resource_monitor.sh`, es un monitor de recursos para sistemas SUSE
 ## Requisitos
 
 - Sistema operativo SUSE.
-- Comandos necesarios: `top`, `free`, `df`, `ip`, `awk`, `grep`.
+- Comandos necesarios: `top`, `free`, `df`, `ip`, `findmnt`, `awk`, `grep`.
 - Bash.
 
 ## Uso
